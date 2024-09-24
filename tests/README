@@ -1,0 +1,96 @@
+Student Information
+-------------------
+Kirsten Chesley (kchesley888)
+
+How to execute the shell
+------------------------
+make the test files
+
+
+Important Notes
+---------------
+Assigned partner (tressec) planned to drop the class and did not do any work.
+No other partner was assigned.
+
+---------------------------------
+
+
+Command Implementations
+-------------------------------------
+thread_function
+    This function is executed by each worker thread in the thread pool and operates in a loop.
+    It takes a worker, which is a struct worker representing the current worker thread.
+    The function does the following in the loop:
+        Locks the thread pool's mutex.
+        Checks if the task queue (tpool->tasks) is empty. 
+            If it's empty and the thread pool is not shutting down, 
+                the thread waits on the pool's condition variable.
+            If the thread pool is shutting down, it releases the mutex and exits the loop and thread.
+            If there are tasks in the queue, it pops a task from the front of the queue and executes it.
+            After executing the task, it updates the task's state and result and signals any waiting threads.
+        If the task queue is empty or the worker didn't find a task to execute, it attempts to steal a task from another worker.
+    After the loop, the function calls pthread_exit(NULL) to kill the worker thread.
+
+steal
+    The function takes a struct worker called worker, representing the worker thread attempting to steal a task.
+    A new future task (struct future) is created. The worker's mutex is locked to protect the data and 
+    the worker's mugger flag is set to true to indicate that it is attempting to steal a task.
+    The worker's mutex is then unlocked. A loop iterates over the list of worker threads in the thread pool as the worker to find a task for stealing.
+    For each worker in the pool, it checks if the worker is not marked as a "mugger" (meaning they are not already trying to steal a task). 
+    If they are not, it locks the victim's (oldLady) worker's mutex and checks if their task queue is not empty.
+    If the oldLady victim worker has a non-empty task queue, the function steals a task by popping it from the 
+    back of the victim's worker's queue, and newt is assigned the stolen task. The victim's worker's mutex is unlocked, 
+    and the function returns the stolen task (newt) if successful. If no victim is found for stealing, the function returns NULL.
+
+thread_pool_new
+    thread_pool_new creates a new thread pool structure in which runs the tasks.
+    The function takes an integer nthreads as a parameter, the number of worker threads to create in the pool. 
+    It allocates a struct thread_pool and initializes it to store information about the thread pool, such as its
+    tasks or its workers. The worker threads are then initialized in a loop and added to the thread pool.
+    If any errors occur during the creation of the thread pool or worker threads, error messages are displayed, 
+    and the program will exit.
+    Finally, the function returns a pointer to the initialized thread pool if successfully created, NULL if not.
+
+thread_pool_submit
+    The function takes three parameters: a pointer to the thread pool pool, a fork_join_task_t function task, 
+    and a pointer to the data associated with the task. It allocates memory for a future and initializes it 
+    to store information about the submitted task. If there is a local thread context (local), 
+    the function locks the local thread's mutex, adds the task to the local thread's task list, 
+    and signals the pool to notify it about the new task. Otherwise, it locks the pool's mutex, 
+    adds the task to the pool's task list, signals the pool to notify worker threads, and unlocks the pool's mutex. 
+    Finally, the function returns a pointer to the initialized future, used to track the task's progress 
+    and retrieve its result when it's complete.
+
+thread_pool_shutdown_and_destroy
+    This function takes a pointer to a struct thread_pool as its parameter, and ensures
+    that the pool is not null. The function then initiates a shutdown of the thread pool, 
+    marking it as "shutdown" to stop the worker threads from accepting new tasks. It then 
+    signals all worker threads to wake up from any condition and check if the pool is shutting down.
+    Then the worker threads are then joined in a loop, waiting for them to finish their work and 
+    if any errors occur while joining the worker threads, error messages are printed. The worker 
+    threads are cleaned up, destroying their associated mutexes and condition variables, along with
+    the pool's mutex and condition variable. Finally, the memory allocated for the thread pool is freed.
+
+future_get
+    The function takes a struct future fut as a parameter, which id a future task that has been submitted to run. 
+    If the function is called from an internal thread (thread associated with the same thread pool as the future task), 
+    it performs the following:
+        Locks the mutex of the future task.
+        Checks the state of the future task. If the state is 0 (not started), it removes the task from its worker's task list, 
+        changes the state to 1 (in progress), and starts executing the task.
+        Waits for the task to complete by blocking on the condition variable associated with the future task.
+        Once the task is completed, and the state is changed to 2, it retrieves the result, unlocks the mutex, and returns the result.
+    If the function is called from an external thread, it waits for the future task to complete and retrieves the result. 
+        It performs the following:
+        Locks the mutex of the future task.
+        Waits for the task to complete by blocking on the condition variable.
+        Once the task is completed, and the state changed to 2, it retrieves the result, unlocks the mutex, and returns the result.
+    If the future task is successfully completed, the function returns the result of the task.
+
+future_free
+    The function takes a struct future fut as its parameter.
+    It first checks that the provided fut is not NULL. If fut is NULL, it returns.
+    If fut is not NULL, the function will:
+        Destroy the fut condition variable.
+        Destroy the fut mutex.
+        Free the memory allocated for the struct future object.
